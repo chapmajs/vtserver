@@ -74,7 +74,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-char *strerror(int errno);
+#include <errno.h>
 
 /* Commands sent in both directions */
 struct vtcmd {
