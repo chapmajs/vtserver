@@ -1,0 +1,7 @@
+If using a Unix emulator, e.g Supnik's, you can do something like this:
+
+$ pdp11 inifile < /dev/ttyp9 > /dev/ttyp9		in one window
+
+In .vtrc, say echo as the stty line, use /dev/ptyp9 as the console line.
+
+Then run vtserver and it would work.

@@ -1,0 +1,1073 @@
+head	1.4;
+access;
+symbols;
+locks
+	wkt:1.4; strict;
+comment	@% @;
+
+
+1.4
+date	2001.03.26.02.02.40;	author wkt;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2001.03.26.00.20.10;	author wkt;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2001.03.23.10.32.44;	author wkt;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2001.01.30.04.10.13;	author mhol;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@last changes to include details of CPUs tested
+@
+text
+@\documentstyle[palatino,mya4]{article}[12pt]
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\begin{document}
+
+\begin{center}
+{\LARGE \bf VTserver: Installing a PDP-11 UNIX with No Tape Drive}
+
+{\Large \bf Warren Toomey}
+
+{\large \it wkt@@cs.adfa.edu.au}
+
+{\large Version 2.3, March 2001}
+\end{center}
+
+
+\section{Introduction}
+
+The Vtserver program provides you with a method of copying a disk image
+into a PDP-11, or extracting a disk image from a PDP-11, without a tape
+drive or indeed an installed operating system.
+
+The approach here is use a nearby Unix or Linux computer as both the
+PDP-11 console and as a virtual tape server.
+The VTserver software comes as two components: a set of PDP-11
+software which acts as the virtual tape client, and the server which is hosted
+on the nearby Unix machine.
+
+The two computers are connected via an RS-232 null modem with hardware
+handshaking. A KL/DL-11 unit on the PDP-11 is used as the serial port: the
+highest transfer rate is 9,600 bps [I could be wrong here -- please
+let me know otherwise]. The main limitation at present is that the PDP-11
+must have at least 192 Kbytes of memory.
+
+\section{Manifest}
+
+The VTserver software is available from
+ftp://minnie.cs.adfa.edu.au/pub/PDP-11/Vtserver as the file \\
+{\tt vtserver2.3x-yyyymmdd.tar.gz}, where the {\it x-yyyymmdd}
+represents the sub-version and the date of release: it's always best
+to get the latest version.
+
+When you extract the files from this tar archive, you will find
+directories {\it vtserver/} and {\it pdpvtstand/}.
+For now, the {\it vtserver/} directory is where you want to go, because
+this contains the PDP-11 binaries and the server program you need.
+You should have received the following files as part of the VTserver
+software:
+
+\begin{description}
+\item[vtreadme.txt:] This document in plain ASCII. There may be translations
+	of this document in other formats, too.
+\item[vtserver.c:] The source code to the server program.
+\item[.vtrc:] The server's configuration file.
+\item[vtboot.pdp:] The machine code to bootstrap using the {\tt vtserver}.
+\item[copy:] The standalone copying program.
+\end{description}
+
+You will also need a disk image for your PDP-11, one that is known to work for
+your model. If you are trying to install a UNIX, then I recommend that you use
+one of the available PDP-11 emulators plus the versions of UNIX in the UNIX
+Archive to create one of these. Don't bother trying to install a disk image
+unless you know that your disk image will work.
+
+Alternatively, you may want to install 2.11BSD using the standard tape
+installation procedure. In this case you will also find modified versions
+of {\it boot}, {\it disklabel}, {\it mkfs}, {\it icheck} and {\it restor}.
+You will need to obtain the 2.11BSD root filesystem dump and the 2.11BSD
+{\it /usr} tar archives from elsewhere.
+
+In the following section, we will discuss how to copy an existing disk
+image from the virtual tape server to your disk. Towards the end, there is
+a section on installing 2.11BSD using the standard tape installation procedure.
+
+\section{Compiling {\tt vtserver}}
+
+The first thing to do is to compile {\tt vtserver.c}:
+
+\begin{verbatim}
+  $ cc -o vtserver vtserver.c
+\end{verbatim}
+
+The code is pretty vanilla ANSI C. The only system-specific sections are that
+to set the serial port to raw mode, and the use of {\it select()}. I have
+used the POSIX {\it termios} system calls, and you may need to modify the
+server code if your system isn't POSIX-compatible. Please send patches back to
+me for this.
+
+\section{Connecting the PDP-11 to the {\tt vtserver}}
+
+The console KL-11 unit 
+needs to be connected via RS-232 to a serial port on the Unix server where
+you compiled {\tt vtserver.c}. Ok, I have no experience here as I don't have a
+real PDP-11. I'd strongly recommend using a null modem cable with full hardware
+handshaking lines (RTS/CTS and DTR/DSR) -- however, I have been told that
+the console line doesn't support hardware handshaking. Can anybody clear
+this up for me?
+
+I'd also recommend having a copy of Kermit on the Unix server end. If no
+communication seems to be taking place, open the serial line with Kermit,
+and see if characters are being received from the PDP-11. An RS-232
+breakout box here could also be useful.
+
+\section{The {\tt .vtrc} File}
+
+The file {\tt .vtrc} is the server's configuration file. Lines beginning
+with hashes are ignored. The first (non-hashed) line gives a shell command
+to set the correct speed and parity of the serial line. The second line names
+the serial device. Remaining lines name the fictitious tape's records, and
+should be {\it copy} and the name of your disk image.
+
+An example {\tt .vtrc} would be:
+
+\begin{verbatim}
+  #       Configuration file for Virtual Tape Server
+  #
+  # First line is any Unix command needed to set the serial port up
+  stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+  #
+  # Second line in this file is the serial port device
+  /dev/ttyd1
+  #
+  # After that is the list of files on the virtual tape, e.g
+  #   Record 0: the copy ptogram
+  #   Record 1: a disk image for your root disk
+  #
+  copy
+  disk.img
+\end{verbatim}
+
+When the {\tt vtserver} opens a file up as a tape record, it will first
+try to do so read/write. If this fails, it will then try to open
+the file read-only. And if this fails, {\tt vtserver} will try to create
+the file. You will see messages from {\tt vtserver} about how a file has been
+opened. The file create option allows you to name several non-existent
+files in the {\tt .vtrc}; they can then be used as tape records to write
+to as required.
+
+\medskip
+
+In your {\tt .vtrc}, you will most likely need to change the name of the
+serial port device and the shell command to set it up.
+You should configure the KL-11 for 9600 baud, 8 bits, no parity, and
+you should do the same for the Unix server. On my FreeBSD box, the
+shell command in my {\tt .vtrc} is:
+
+\begin{verbatim}
+  stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+\end{verbatim}
+
+If you are using hardware handshaking lines (and you should), change this to:
+
+\begin{verbatim}
+  stty -f /dev/ttyid1 9600 cs8 -clocal crtscts
+\end{verbatim}
+
+\section{Starting {\tt vtserver}}
+
+{\tt vtserver} is started with no arguments, and reads its configuration
+file {\tt .vtrc}. The {\tt vtserver} then gives a short description of
+the tape's contents:
+
+\begin{verbatim}
+  $ vtserver
+  Virtual tape server, $Revision: 1.3 $ 
+  Running command stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+
+  Tape records are:
+     0 boot
+     1 copy
+     2 disk.img
+
+  Opening port /dev/ttyd1 .... Port open
+\end{verbatim}
+
+At this point, you can use {\tt vtserver} as your PDP-11's console. However,
+when the VT client starts sending VT commands to {\tt vtserver}, you will
+see messages from the server describing which file is being transferred.
+
+As each file is opened, its name is shown on the screen. An `r' signifies a
+read of 512 bytes. If the VT client on the PDP-11 tries to read past the
+file's end, an EOF is shown. Finally, a progress message is shown every 100K
+of a file's download.
+
+When not downloading a file, you can exit {\tt vtserver} by typing two
+consecutive ESC keys at the console.
+
+\section{Booting via {\tt vtserver}: Hand Method}
+
+The first stage of the boot process is to enter the boot code which
+retrieves the file {\tt boot} from the {\tt vtserver}. If you don't
+have ODT in your PDP-11, then you will have to hand-enter this code.
+The code should be entered at address 140000 onwards. The code is given in
+the file {\tt vtboot.pdp}, and also in octal below.
+
+\begin{verbatim}
+0140000: 010706 005003 012701 177560 012704 140106 112400 100406
+0140020: 105761 000004 100375 110061 000006 000770 005267 000052
+0140040: 004767 000030 001403 012703 006400 005007 012702 001000
+0140060: 004767 000010 110023 005302 001373 000746 105711 100376
+0140100: 116100 000002 000207 025037 000000 000000 177777
+\end{verbatim}
+
+Toggle in the code, and start execution at address 140000. If all goes well,
+the bootstrap code will start to send VT commands, and you will see the
+following from the {\tt vtserver}:
+
+\begin{verbatim}
+  Opened copy read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+  Standalone copy program - known devices are 
+  ht tm ts ram hk ra rk rl rx si xp br tms vt 
+\end{verbatim}
+
+\section{Booting via {\tt vtserver}: ODT Method}
+
+If your PDP-11 does have ODT, then you can get the {\tt vtserver} itself to
+send the bootstrap code down. Firstly make sure that the ODT prompt is
+awaiting a command, then (shutdown and) start {\tt vtserver} as follows:
+
+\begin{verbatim}
+  $ vtserver -odt
+  Virtual tape server, $Revision: 1.3 $ 
+  . . .
+  Opened copy read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+\end{verbatim}
+
+The {\tt -odt} flag tells {\tt vtserver} to download the bootstrap code
+and to jump to location 140000. The first tape record is downloaded,
+and the standalone {\it copy} program starts up.
+
+\begin{quote}
+{\bf Note!} I don't have a PDP-11 with ODT, so this feature is untested.
+If you have such a system, please try this out and let me know if it
+works. The actual code to deal with ODT in {\tt vtserver.c} is relatively
+simple; if you find a bug, can you fix it and send me back the changes.
+\end{quote}
+
+\section{Copying Disk Images}
+
+When {\it copy} has loaded and starts running, you will be prompted for the
+input and output devices.
+
+\begin{verbatim}
+  Standalone copy program - known devices are 
+  ht tm ts ram hk ra rk rl rx si xp br tms vt 
+
+  Tape record n from device xx is written as xx(0,0,n)
+  Disk device xx is written as xx(0,0,0)
+
+  Enter name of input record/device:
+  Enter name of output record/device:
+\end{verbatim}
+
+{\it Copy} use the 2.11BSD terminology for devices, units and partitions,
+and you should probably read the 2.11BSD setup documentation here. However,
+to describe record {\it n} from tape device {\it xx}, you would say
+{\it xx(0,0,n)}. And to describe the whole of disk device {\it xx}, you would
+just say {\it xx(0,0,0)}.
+
+Remember that you can read from any device and write to any device. So you
+can write a disk image from the {\tt vtserver} to your PDP-11, or you can
+copy an existing disk image from your PDP-11 to a file on the {\tt vtserver}.
+
+The available tape and disk devices are:
+
+\begin{description}
+\item[br] RP03-like disk driver, modified to handle BR 1537 and 1711
+	controllers with T300, T200, T80 and T50 drives.
+\item[hk] RK06/07 disk driver.
+\item[ra] MSCP disk device driver (rx23, rx33, rx50, rd??, ra??, rz??).
+\item[rk] RK disk driver.
+\item[rl] RL disk driver.
+\item[rx] RX02 disk driver.
+\item[si] SI 9500 CDC 9766 disk driver.
+\item[xp] SMD disk driver.
+
+\item[vt] Virtual Tape drive.
+\item[ht] TU16/TE16/TU77 tape driver.
+\item[tm] TU10/TE10/TS03 tape driver.
+\item[ts] TS11/TU80/TS05/TK25 tape driver.
+\end{description}
+
+\section{An Example Disk Image Copy}
+
+Here is an example output where the user has booted from the {\tt vtserver},
+loaded {\it copy} and then copied the image {\it disk.img} to their RL02 disk.
+
+\begin{verbatim}
+  Virtual tape server, $Revision: 1.3 $ 
+  Running command stty -f /dev/ttyid1 19200 cs8 clocal -crtscts
+
+  Tape records are:
+     0 copy
+     1 disk.img
+
+  Opening port /dev/ttyd1 .... Port open
+
+  Opened copy read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+  Standalone copy program - known devices are 
+  ht tm ts ram hk ra rk rl rx si xp br tms vt 
+
+  Tape record n from device xx is written as xx(0,0,n)
+  Disk device xx is written as xx(0,0,0)
+
+  Enter name of input record/device: vt(0,0,1)
+
+  Opened disk.img read-write
+   Enter name of output record/device: rl(0,0,0)
+  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ... rrrr EOF
+  EOF
+  Copying done. Either reset the system, or hit
+  <return> to exit the standalone program.
+\end{verbatim}
+
+At this point, the PDP-11 can be rebooted. If the downloaded disk image
+is bootable, the user should now have a working PDP-11 operating system.
+
+\section{Installing 2.11BSD with Vtserver}
+
+To install 2.11BSD via the {\tt vtserver}, you need to set up a virtual
+tape with records corresponding to the standard 2.11BSD tape. You don't
+need any boostrap records on your virtual tape, and so your {\tt .vtrc}
+file should look something like this (minus the comment lines):
+
+\begin{verbatim}
+  stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+  /dev/ttyd1
+  boot.dd
+  disklabel
+  mkfs
+  restor
+  icheck
+  root.dump
+  usr.tar
+  otherusr.tar
+\end{verbatim}
+
+Don't use the standalone programs {\it disklabel},
+{\it mkfs}, {\it icheck} and {\it restor} from standard 2.11BSD, as they
+don't speak the VT protocol. Instead, use the VT-enabled programs supplied
+with the {\tt vtserver}.
+
+Apart from setting up the serial line, compiling and starting {\tt vtserver},
+and entering in the VT boot code, you should be able to follow the standard
+2.11BSD installation instructions. As an example, here is an example output
+where a user made a root filesystem on an RL02, and then restored the
+{\it root.dump} to this disk:
+
+\begin{verbatim}
+  $ vtserver 
+  Virtual tape server, $Revision: 1.3 $ 
+  Running command stty -f /dev/ttyid1 19200 cs8 clocal -crtscts
+  
+  Tape records are:
+     0 boot.dd
+     1 disklabel
+     2 mkfs
+     3 restor
+     4 icheck
+     5 root.dump
+  
+  Opening port /dev/ttyd1 .... Port open
+  
+  Opened boot.dd read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+  
+  45Boot from vt(0,0,0) at 0177560
+  : vt(0,0,1)
+  
+  Opened disklabel read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06401
+                                                               bootcsr=0177560
+  disklabel
+  Disk? rl(0,0,0)
+  'rl(0,0,0)' is unlabeled or the label is corrupt.
+  Proceed? [y/n] y
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? D
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? d
+  
+  type: old DEC
+  disk: 
+  label: DEFAULT
+  flags:
+  bytes/sector: 512
+  sectors/track: 20
+  tracks/cylinder: 2
+  sectors/cylinder: 40
+  cylinders: 512
+  rpm: 3600
+  drivedata: 0 0 0 0 0 
+  
+  1 partitions:
+  #        size   offset    fstype   [fsize bsize]
+    a: 20480 0  2.11BSD    1024 1024      # (Cyl. 0 - 511)
+  
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? m
+  modify
+  d(isplay) g(eometry) m(isc) p(artitions) q(uit)? p
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? n
+  Number of partitions (8 max) [1]? 2
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? s
+  a b c d e f g h q(uit)? a
+  sizes and offsets may be given as sectors, cylinders
+  or cylinders plus sectors:  6200, 32c, 19c10s respectively
+  modify partition 'a'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? s
+  'a' size [20480]: 20000
+  modify partition 'a'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? q
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? s
+  a b c d e f g h q(uit)? b
+  sizes and offsets may be given as sectors, cylinders
+  or cylinders plus sectors:  6200, 32c, 19c10s respectively
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? o
+  'b' offset [0]: 20000
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? s
+  'b' size [0]: 480
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? t
+  'b' fstype [unused]: swap
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? q
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? d
+  
+  type: old DEC
+  disk: 
+  label: DEFAULT
+  flags:
+  bytes/sector: 512
+  sectors/track: 20
+  tracks/cylinder: 2
+  sectors/cylinder: 40
+  cylinders: 512
+  rpm: 3600
+  drivedata: 0 0 0 0 0
+  
+  2 partitions:
+  #        size   offset    fstype   [fsize bsize]
+    a: 20000 0  2.11BSD    1024 1024      # (Cyl. 0 - 499)
+    b: 480 20000  swap                    # (Cyl. 500 - 511)
+  
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? q
+  modify
+  d(isplay) g(eometry) m(isc) p(artitions) q(uit)? q
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? w
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? q
+  
+  45Boot from vt(0,0,1) at 0177560
+  : vt(0,0,2)
+  
+  Opened mkfs read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06402
+                                                       bootcsr=0177560
+  Mkfs
+  file system: rl(0,0,0)
+  file sys size [10000]: 
+  bytes per inode [4096]: 
+  interleaving factor (m; 2 default): 
+  interleaving modulus (n; 20 default): 
+  isize = 2496
+  m/n = 2 20
+  Exit called
+  
+  45Boot from vt(0,0,2) at 0177560
+  : vt(0,0,4)
+  
+  Opened icheck read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06403
+                                                           bootcsr=0177560
+  Icheck
+  File: rl(0,0,0)
+  rl(0,0,0):
+  files 3 (r=1,d=2,b=0,c=0,l=0,s=0)
+  used 2 (i=0,ii=0,iii=0,d=2)
+  free 9840
+  missing 0
+  
+  45Boot from vt(0,0,4) at 0177560
+  : vt(0,0,3)
+  
+  Opened restor read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06404
+                                                             bootcsr=0177560
+  Restor
+  Tape? vt(0,0,5)
+  
+  Opened root.dump read-write
+   Disk? rl(0,0,0)
+  Last chance before scribbling on disk. rrrrrrrrrrrrr ... 
+  rrrrrrrrrEnd of tape
+ 
+  45Boot from vt(0,0,4) at 0177560
+  : rl(0,0,0)unix
+  Boot: bootdev=03400 bootcsr=0174400
+  
+  2.11 BSD UNIX #115: Sat Apr 22 19:07:25 PDT 2000
+      sms1@@curly.2bsd.com:/usr/src/sys/GENERIC
+  [etc.]
+\end{verbatim}
+
+\section{Other Comments}
+
+The {\tt vtserver/} directory holds the source code {\tt vtserver.c} as
+well as the client binaries {\it boot.dd}, {\it copy}, {\it disklabel},
+{\it mkfs}, {\it icheck} and {\it restor}.
+
+The {\tt pdpvtstand/} directory holds the source code for the PDP-11 side of
+things: {\tt vtboot.pdp}, {\tt boot}, {\tt copy}, {\it disklabel},
+{\it mkfs}, {\it icheck} and {\it restor}. In fact, this is a copy
+of {\tt /sys/pdpstand} from 2.11BSD which has been modified to have the
+{\tt vt.c} client, the source code for {\tt copy} and {\tt vtboot.pdp}.
+
+To compile all of this, you'll need a 2.11BSD system. Place
+this directory in {\tt /usr/src/sys}, change into {\tt pdpvtstand/}
+and run {\it make}. See the RCS comments for details.
+
+\section{Caveats}
+
+The VTserver software should be considered in beta release.
+Your feedback is most definitely requested, to fix any bugs and to improve
+the software. In particular, I haven't tried this software on all PDP-11
+platforms: it should work on a system without split I\&D, but it does
+require 192 Kbytes of memory.
+
+More specifically, I've used the Ersatz-11 2.0 demo simulator with various
+CPU models, and RL02 and RK05 disk images, to test {\it copy}. Here are the
+results: {\it copy} can read and write disk images for /24, /34A, /40, /44,
+/45, /70 and /94 systems when they have 256Kbytes of memory. It doesn't work
+for the 11/35 as it doesn't have the MUL instruction, which the 2.11BSD C
+compiler generates.
+
+Also, I have never owned or used a real PDP-11. The VTserver software was
+developed using the Ersatz-11 2.0 simulator and Bob Supnik's 2.3 simulator.
+For this reason, there may be hardware-specific bugs in the software which
+were not found using the simulators. As well, the terminology in this manual
+may not be correct PDP-11 speak. Again, please send me your suggestions and
+improvements!
+
+\end{document}
+@
+
+
+1.3
+log
+@brought doc up to date with latest server & client
+@
+text
+@d165 1
+a165 1
+  Virtual tape server, $Revision: 1.2 $ 
+d223 1
+a223 1
+  Virtual tape server, $Revision: 1.2 $ 
+d291 1
+a291 1
+  Virtual tape server, $Revision: 2.3.1.4 $ 
+d354 1
+a354 1
+  Virtual tape server, $Revision: 2.3.1.4 $ 
+d529 1
+a529 2
+\begin{enumerate}
+\item The VTserver software should be considered in beta release.
+d535 13
+a547 6
+\item I have never owned or used a real PDP-11. The VTserver software
+was developed using a number of PDP-11 emulators. For this reason, there
+may be hardware-specific bugs in the software which were not found using the
+emulators. As well, the terminology in this manual may not be correct PDP-11
+speak. Again, please send me your suggestions and improvements!
+\end{enumerate}
+@
+
+
+1.2
+log
+@reintegrated with 2.11 code
+@
+text
+@a15 18
+\section{Caveat}
+
+Before you even start looking at this software, there are some caveats
+which go with it.
+
+\begin{enumerate}
+\item The VTserver software should be considered in beta release.
+Your feedback is most definitely requested, to fix any bugs and to improve
+the software. In particular, I haven't tried this software on all PDP-11
+platforms: it should work on a system without split I\&D, but it does
+require 128 Kwords of memory.
+
+\item I have never owned or used a real PDP-11. The VTserver software
+was developed using a number of PDP-11 emulators. For this reason, there
+may be hardware-specific bugs in the software which were not found using the
+emulators. As well, the terminology in this manual may not be correct PDP-11
+speak. Again, please send me your suggestions and improvements!
+\end{enumerate}
+d19 3
+a21 12
+Several members of the PUPS mailing list (see
+http://minnie.cs.adfa.edu.au/PUPS/) have wanted a way of installing UNIX
+onto a PDP-11 which has no tape drive. One solution, if the PDP-11 has
+software already installed (RT-11, RSX etc.) is to leverage from the
+installed software to download and write UNIX onto a spare disk.
+This approach is not covered here, and someone who has done this
+should be encouraged to write it up.
+
+The approach here has been to modify the initial UNIX tape loading software
+so that bits can be downloaded from a nearby computer over a serial cable.
+The modified boot straps thus perceive a {\it Virtual Tape} drive; hence
+the name of the software.
+d23 2
+d26 2
+a27 2
+software which acts as the client, and the server which is hosted on a
+second machine, running Unix.
+d32 2
+a33 2
+let me know otherwise]. Although this is a way to install UNIX on
+a PDP-11, its a pretty slow way.
+d39 3
+a41 1
+{\tt vtserver2.3.tar.gz}.
+d43 2
+d56 1
+a56 2
+\item[boot:] Second stage bootstrap.
+\item[copy:] Essentially a standalone copying program.
+d59 5
+a63 5
+You will also need a root disk image for your PDP-11, one that is known
+to work for your model. I recommend that you use one of the available
+PDP-11 emulators plus the versions of UNIX in the UNIX Archive to create
+one of these. Don't bother reading any further until you know that your
+disk image will work.
+d67 3
+a69 3
+of {\it disklabel}, {\it mkfs}, {\it icheck} and {\it restor}. You will
+need to obtain the 2.11BSD root filesystem dump and the 2.11BSD {\it /usr}
+tar archives from elsewhere.
+d85 2
+a86 2
+used the Posix {\it termios} system calls, and you may need to modify the
+server code if your system isn't Posix-compatible. Please send patches back to
+d92 1
+a92 1
+needs to be connected via RS-232 to the serial port on the Unix server where
+d107 1
+a107 1
+with hashes are ignored. The first (non-hashed) gives a shell command
+d110 1
+a110 1
+should be {\it boot}, {\it copy}, and the name of your disk image.
+d124 2
+a125 3
+  #   Record 0: the boot program
+  #   Record 1: the copy ptogram
+  #   Record 2: a disk image for your root disk
+a126 1
+  boot
+d131 12
+a142 2
+You will most likely need to change the name of the serial port device
+and the shell command in {\tt .vtrc} to set it up.
+d160 1
+a160 1
+file {\tt .vtrc}. {\tt vtserver} then starts up with a short description of
+d164 2
+a165 1
+  Virtual tape server, $Revision: 2.3 $ 
+d188 1
+a188 1
+\section{Booting via {\tt vtserver}}
+d191 4
+a194 3
+retrieves the file {\tt boot} from the {\tt vtserver}. This code should
+be entered at address 140000 onwards. The code is given in the
+{\tt vtboot.pdp}, and also in octal below.
+a203 8
+\begin{quote}
+Help! It would be nice for the server to send ODT commands to the
+PDP-11 to make this easier. Can someone send me some details on ODT
+(i.e what prompt it gives, what commands can be used to deposit
+values in memory), and I will modify the {\it vtserver} to send this
+automatically.
+\end{quote}
+
+d209 7
+a215 2
+  Opened boot
+   rrrrrrrrrrrrrr EOF
+d217 10
+a226 2
+  xxBoot from vt(0,0,0) at 0177560
+  :
+d229 22
+a250 2
+The {\it xx} identifies which CPU you have: see the 2.11BSD
+installation guide for details.
+d252 3
+a254 3
+This is the standard 2.11BSD {\it boot} program. Enter the name of the
+tape record that you wish to load (most likely record 1 for {\it copy}). This
+is done by entering the word {\it vt(0,0,1)}.
+d256 9
+a264 4
+When {\it copy} loads, you will be prompted for the input record and the
+output disk device. Both {\it boot} and {\it copy} use the 2.11BSD terminology
+for devices, units and partitions, and you should probably read the 2.11BSD
+setup documentation here.
+d266 1
+a266 1
+Available devices are:
+a284 6
+Use the name {\it vt(0,0,x)} to read from virtual tape record {\it x}.
+Use the name {\it ra(0,0,0)} to write directly to the MSCP disk device.
+Note: {\it copy} will complain that the disk doesn't have a 2.11BSD disklabel,
+and that the copying will ``span the volume''. This just means that the
+copy will write across the entire disk, which is probably what you want.
+
+d288 1
+a288 2
+loaded {\it boot} and then {\it copy}, and then copied the image
+{\it disk.img} to their RL02 disk.
+d291 2
+a292 2
+  Opened boot
+  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+d294 3
+a296 2
+  53Boot from vt(0,0,0) at 0177560
+  : vt(0,0,1)
+d298 1
+a298 4
+  Opened copy
+  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06401 bootcsr=0177560
+  copy
+  Infile: vt(0,0,2)
+d300 16
+a315 7
+  Opened disk.img
+  Outfile: rl(0,0,0)
+  rl(0,0,0) disklabel missing/corrupt
+  rl(0,0,0) spans volume
+  rrrrrrrrrrrrrrrrrrrrrrr ...
+  53Boot from vt(0,0,1) at 0177560
+  :
+d331 1
+a331 1
+  boot
+d354 139
+a492 21
+  Virtual tape server, $Revision: 2.3 $ 
+  Running command echo
+
+Tape records are:
+   0 boot
+   1 disklabel
+   2 mkfs
+   3 restor
+   4 icheck
+   5 root.dump
+
+Opening port /dev/ptyp9 .... Port open
+
+Opened boot
+ rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+
+53Boot from vt(0,0,0) at 0177560
+: vt(0,0,1)
+
+Opened disklabel
+ rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06401
+d494 15
+a508 75
+disklabel
+Disk? rl(0,0,0)
+d(isplay) D(efault) m(odify) w(rite) q(uit)? d
+
+type: old DEC
+disk:
+label: DEFAULT
+flags:
+bytes/sector: 512
+sectors/track: 20
+tracks/cylinder: 2
+sectors/cylinder: 40
+cylinders: 512
+rpm: 3600
+drivedata: 0 0 0 0 0 
+
+1 partitions:
+#        size   offset    fstype   [fsize bsize]
+  a: 20480 0  2.11BSD    1024 1024      # (Cyl. 0 - 511)
+
+d(isplay) D(efault) m(odify) w(rite) q(uit)? D
+d(isplay) D(efault) m(odify) w(rite) q(uit)? w
+d(isplay) D(efault) m(odify) w(rite) q(uit)? q
+
+53Boot from vt(0,0,1) at 0177560
+: vt(0,0,2)
+
+Opened mkfs
+ rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06402
+                                                     bootcsr=0177560
+Mkfs
+file system: rl(0,0,0)
+file sys size [10240]: 
+bytes per inode [4096]: 
+interleaving factor (m; 2 default): 
+interleaving modulus (n; 20 default): 
+isize = 2560
+m/n = 2 20
+Exit called
+
+53Boot from vt(0,0,2) at 0177560
+: vt(0,0,4)
+
+Opened icheck
+ rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06403
+                                                         bootcsr=0177560
+Icheck
+File: rl(0,0,0)
+rl(0,0,0):
+files 3 (r=1,d=2,b=0,c=0,l=0,s=0)
+used 2 (i=0,ii=0,iii=0,d=2)
+free 10076
+missing 0
+
+53Boot from vt(0,0,4) at 0177560
+: vt(0,0,3)
+
+Opened restor
+ rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06404
+                                                           bootcsr=0177560
+Restor
+Tape? vt(0,0,5)
+
+Opened root.dump
+ Disk? rl(0,0,0)
+Last chance before scribbling on disk. rrrrrrr .....
+rrrrrrrrrEnd of tape
+
+53Boot from vt(0,0,5) at 0177560
+: rl(0,0,0)unix
+Boot: bootdev=03400 bootcsr=0174400
+
+2.11 BSD UNIX #115: Sat Apr 22 19:07:25 PDT 2000
+    sms1@@curly.2bsd.com:/usr/src/sys/GENERIC
+[etc.]
+d514 1
+a514 1
+well as the client binaries {\it boot}, {\it copy}, {\it disklabel},
+d526 17
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d13 1
+a13 1
+{\large Version 2.0, 30th February,2001}
+d22 1
+a22 1
+\item The VTserver software should be considered in alpha release.
+d24 3
+a26 1
+the software.
+d56 2
+a57 1
+highest transfer rate is 9,600 bps. Although this is a way to install UNIX on
+d64 4
+a67 1
+{\tt vtserver2.0.tar.gz}.
+d72 2
+a73 2
+\item[vtreadme.txt:] This document in plain ASCII. There may be an
+	equivalent PostScript file, {\bf vtreadme.ps}.
+d77 1
+a77 1
+\item[tinyboot:] Second stage bootstrap.
+d87 10
+d105 22
+a126 4
+The code is pretty vanilla ANSI C. The only system-specific section is
+that on setting the serial port to raw mode, and select(). I have used the
+Posix {\it termios} system calls, and you may need to port this if your system
+isn't Posix-compatible. Please send patches back to me for this.
+d132 1
+a132 1
+should be {\it tinyboot}, {\it copy}, and the name of your disk image.
+d134 1
+a134 2
+You will most likely need to change the name of the serial port device
+and the shell command to set it up.
+d136 18
+a153 7
+\section{Connecting the PDP-11 to the {\tt vtserver}}
+
+The console KL-11 unit 
+needs to be connected via RS-232 to the serial port on the Unix server where
+you compiled {\tt vtserver.c}. Ok, I have no experience here as I don't have a
+real PDP-11. I'd strongly recommend using a null modem cable with full hardware
+handshaking lines (RTS/CTS and DTR/DSR).
+d155 2
+d162 1
+a162 1
+  $ stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+d165 1
+a165 1
+If you are using hardware handshaking lines (and you should), change this to
+d168 1
+a168 1
+  $ stty -f /dev/ttyid1 9600 cs8 -clocal crtscts
+a170 5
+I'd also recommend having a copy of Kermit on the Unix server end. If no
+communication seems to be taking place, open the serial line with Kermit,
+and see if characters are being received from the PDP-11. An RS-232
+breakout box here could also be useful.
+
+d174 2
+a175 2
+file {\tt .vtrc}. You should have done the serial port settings before this.
+{\tt vtserver} starts up with a short description of the tape's contents:
+d178 1
+a178 1
+  Virtual tape server, $Revision: 2.0 $ 
+d182 1
+a182 1
+     0 tinyboot
+d184 1
+a184 1
+     2 root.img
+d189 8
+a196 2
+It will then sit there waiting for commands from the PDP-11. When commands
+are being performed, you will see something like the following:
+d198 2
+a199 22
+\begin{verbatim}
+  Opened tinyboot
+   rrrrrrrrrrrrrr EOF
+
+  40tinyboot from virtual tape server
+  Load tape record: 1
+
+  Opened copy
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrcopy
+  Infile: vt(0,0,2)
+  Outfile: rk(0,0,0)
+
+  Opened root.img
+   rrrrrrrrrr ...
+\end{verbatim}
+
+As each file is opened, it is shown on the screen. `r' signifies a read of
+512 bytes. If the PDP-11
+tries to read past the file's end, an EOF is shown. Finally, a progress
+message is shown every 100K of a file's download.
+
+{\tt vtserver} is terminated by two consecutive ESC keys at the console.
+d205 2
+a206 2
+be entered at address 070000 onwards. The code is given in the
+{\tt vtboot.pdp}, and in octal below.
+d209 5
+a213 5
+0070000: 010706 005001 012703 177560 012704 070102 112400 100406
+0070020: 105763 000004 100375 110063 000006 000770 005267 000046
+0070040: 004767 000024 001401 005007 012702 001000 004767 000010
+0070060: 110021 005302 001373 000750 105713 100376 116300 000002
+0070100: 000207 025037 000000 000000 177777                     
+d218 4
+a221 1
+PDP-11 to make this easier. Any ideas?
+d224 3
+a226 3
+Toggle in the code, and start execution at address 70000. If all goes well,
+you will see ``40tinyboot from virtual tape server'' from {\tt vtserver},
+and you will receive the following on the PDP-11 console.
+d228 3
+a230 5
+\section{Second-Stage Bootstrap}
+\label{boot2}
+
+Once {\it tinyboot} is loaded you will see 
+the following on the PDP-11 console:
+d232 2
+a233 3
+\begin{verbatim}
+  40tinyboot from virtual tape server
+  Load tape record:
+d236 2
+a237 2
+This is the {\it tinyboot}. Enter the number of the tape record that
+you wish to load (most likely 1 for {\it copy}).
+d239 8
+a246 4
+When {\it copy} loads, you will be prompted for the input file and the
+output file. {\it copy} uses the 2.11BSD terminology for devices, units
+and partitions, and you should probably read the 2.11BSD setup documentation
+here.
+d259 2
+d262 3
+a264 1
+\item[xp] SMD disk driver.
+d267 167
+a433 1
+Use the device {\it vt(0,0,x)} to read from virtual tape record {\it x}.
+d437 10
+a446 2
+The {\tt vtboot} directory holds the source code for the PDP-11 side of
+things: {\tt vtboot.pdp}, {\tt tinyboot} and {\tt copy}.
+d448 2
+a449 5
+this directory in /usr/src/sys, and run {\it make}. See the RCS comments for
+details.
+
+I have `ported' some of the standalone 2.11BSD commands, which get
+made by {\it make}. I also want to port the V6 and V7 standalone commands.
+@

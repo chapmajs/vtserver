@@ -1,0 +1,544 @@
+           VTserver: Installing a PDP-11 UNIX with No Tape Drive
+
+                               Warren Toomey
+                             wkt@cs.adfa.edu.au
+                          Version 2.3, March 2001
+
+Introduction
+
+The Vtserver program provides you with a method of copying a disk image into
+a PDP-11, or extracting a disk image from a PDP-11, without a tape drive or
+indeed an installed operating system.
+
+The approach here is use a nearby Unix or Linux computer as both the PDP-11
+console and as a virtual tape server. The VTserver software comes as two
+components: a set of PDP-11 software which acts as the virtual tape client,
+and the server which is hosted on the nearby Unix machine.
+
+The two computers are connected via an RS-232 null modem with hardware
+handshaking. A KL/DL-11 unit on the PDP-11 is used as the serial port: the
+highest transfer rate is 9,600 bps [I could be wrong here - please let me
+know otherwise]. The main limitation at present is that the PDP-11 must have
+at least 192 Kbytes of memory.
+
+Manifest
+
+The VTserver software is available from
+ftp://minnie.cs.adfa.edu.au/pub/PDP-11/Vtserver as the file
+vtserver2.3x-yyyymmdd.tar.gz, where the x-yyyymmdd represents the
+sub-version and the date of release: it's always best to get the latest
+version.
+
+When you extract the files from this tar archive, you will find directories
+vtserver/ and pdpvtstand/. For now, the vtserver/ directory is where you
+want to go, because this contains the PDP-11 binaries and the server program
+you need. You should have received the following files as part of the
+VTserver software:
+
+vtreadme.txt:
+     This document in plain ASCII. There may be translations of this
+     document in other formats, too.
+vtserver.c:
+     The source code to the server program.
+.vtrc:
+     The server's configuration file.
+vtboot.pdp:
+     The machine code to bootstrap using the vtserver.
+copy:
+     The standalone copying program.
+
+You will also need a disk image for your PDP-11, one that is known to work
+for your model. If you are trying to install a UNIX, then I recommend that
+you use one of the available PDP-11 emulators plus the versions of UNIX in
+the UNIX Archive to create one of these. Don't bother trying to install a
+disk image unless you know that your disk image will work.
+
+Alternatively, you may want to install 2.11BSD using the standard tape
+installation procedure. In this case you will also find modified versions of
+boot, disklabel, mkfs, icheck and restor. You will need to obtain the
+2.11BSD root filesystem dump and the 2.11BSD /usr tar archives from
+elsewhere.
+
+In the following section, we will discuss how to copy an existing disk image
+from the virtual tape server to your disk. Towards the end, there is a
+section on installing 2.11BSD using the standard tape installation
+procedure.
+
+Compiling vtserver
+
+The first thing to do is to compile vtserver.c:
+
+  $ cc -o vtserver vtserver.c
+
+The code is pretty vanilla ANSI C. The only system-specific sections are
+that to set the serial port to raw mode, and the use of select(). I have
+used the POSIX termios system calls, and you may need to modify the server
+code if your system isn't POSIX-compatible. Please send patches back to me
+for this.
+
+Connecting the PDP-11 to the vtserver
+
+The console KL-11 unit needs to be connected via RS-232 to a serial port on
+the Unix server where you compiled vtserver.c. Ok, I have no experience here
+as I don't have a real PDP-11. I'd strongly recommend using a null modem
+cable with full hardware handshaking lines (RTS/CTS and DTR/DSR) - however,
+I have been told that the console line doesn't support hardware handshaking.
+Can anybody clear this up for me?
+
+I'd also recommend having a copy of Kermit on the Unix server end. If no
+communication seems to be taking place, open the serial line with Kermit,
+and see if characters are being received from the PDP-11. An RS-232 breakout
+box here could also be useful.
+
+The .vtrc File
+
+The file .vtrc is the server's configuration file. Lines beginning with
+hashes are ignored. The first (non-hashed) line gives a shell command to set
+the correct speed and parity of the serial line. The second line names the
+serial device. Remaining lines name the fictitious tape's records, and
+should be copy and the name of your disk image.
+
+An example .vtrc would be:
+
+  #       Configuration file for Virtual Tape Server
+  #
+  # First line is any Unix command needed to set the serial port up
+  stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+  #
+  # Second line in this file is the serial port device
+  /dev/ttyd1
+  #
+  # After that is the list of files on the virtual tape, e.g
+  #   Record 0: the copy ptogram
+  #   Record 1: a disk image for your root disk
+  #
+  copy
+  disk.img
+
+When the vtserver opens a file up as a tape record, it will first try to do
+so read/write. If this fails, it will then try to open the file read-only.
+And if this fails, vtserver will try to create the file. You will see
+messages from vtserver about how a file has been opened. The file create
+option allows you to name several non-existent files in the .vtrc; they can
+then be used as tape records to write to as required.
+
+In your .vtrc, you will most likely need to change the name of the serial
+port device and the shell command to set it up. You should configure the
+KL-11 for 9600 baud, 8 bits, no parity, and you should do the same for the
+Unix server. On my FreeBSD box, the shell command in my .vtrc is:
+
+  stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+
+If you are using hardware handshaking lines (and you should), change this
+to:
+
+  stty -f /dev/ttyid1 9600 cs8 -clocal crtscts
+
+Starting vtserver
+
+vtserver is started with no arguments, and reads its configuration file
+.vtrc. The vtserver then gives a short description of the tape's contents:
+
+  $ vtserver
+  Virtual tape server, $Revision: 1.4 $
+  Running command stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+
+  Tape records are:
+     0 boot
+     1 copy
+     2 disk.img
+
+  Opening port /dev/ttyd1 .... Port open
+
+At this point, you can use vtserver as your PDP-11's console. However, when
+the VT client starts sending VT commands to vtserver, you will see messages
+from the server describing which file is being transferred.
+
+As each file is opened, its name is shown on the screen. An `r' signifies a
+read of 512 bytes. If the VT client on the PDP-11 tries to read past the
+file's end, an EOF is shown. Finally, a progress message is shown every 100K
+of a file's download.
+
+When not downloading a file, you can exit vtserver by typing two consecutive
+ESC keys at the console.
+
+Booting via vtserver: Hand Method
+
+The first stage of the boot process is to enter the boot code which
+retrieves the file boot from the vtserver. If you don't have ODT in your
+PDP-11, then you will have to hand-enter this code. The code should be
+entered at address 140000 onwards. The code is given in the file vtboot.pdp,
+and also in octal below.
+
+0140000: 010706 005003 012701 177560 012704 140106 112400 100406
+0140020: 105761 000004 100375 110061 000006 000770 005267 000052
+0140040: 004767 000030 001403 012703 006400 005007 012702 001000
+0140060: 004767 000010 110023 005302 001373 000746 105711 100376
+0140100: 116100 000002 000207 025037 000000 000000 177777
+
+Toggle in the code, and start execution at address 140000. If all goes well,
+the bootstrap code will start to send VT commands, and you will see the
+following from the vtserver:
+
+  Opened copy read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+  Standalone copy program - known devices are
+  ht tm ts ram hk ra rk rl rx si xp br tms vt
+
+Booting via vtserver: ODT Method
+
+If your PDP-11 does have ODT, then you can get the vtserver itself to send
+the bootstrap code down. Firstly make sure that the ODT prompt is awaiting a
+command, then (shutdown and) start vtserver as follows:
+
+  $ vtserver -odt
+  Virtual tape server, $Revision: 1.4 $
+  . . .
+  Opened copy read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+
+The -odt flag tells vtserver to download the bootstrap code and to jump to
+location 140000. The first tape record is downloaded, and the standalone
+copy program starts up.
+
+     Note! I don't have a PDP-11 with ODT, so this feature is untested.
+     If you have such a system, please try this out and let me know if
+     it works. The actual code to deal with ODT in vtserver.c is
+     relatively simple; if you find a bug, can you fix it and send me
+     back the changes.
+
+Copying Disk Images
+
+When copy has loaded and starts running, you will be prompted for the input
+and output devices.
+
+  Standalone copy program - known devices are
+  ht tm ts ram hk ra rk rl rx si xp br tms vt
+
+  Tape record n from device xx is written as xx(0,0,n)
+  Disk device xx is written as xx(0,0,0)
+
+  Enter name of input record/device:
+  Enter name of output record/device:
+
+Copy use the 2.11BSD terminology for devices, units and partitions, and you
+should probably read the 2.11BSD setup documentation here. However, to
+describe record n from tape device xx, you would say xx(0,0,n). And to
+describe the whole of disk device xx, you would just say xx(0,0,0).
+
+Remember that you can read from any device and write to any device. So you
+can write a disk image from the vtserver to your PDP-11, or you can copy an
+existing disk image from your PDP-11 to a file on the vtserver.
+
+The available tape and disk devices are:
+
+br
+     RP03-like disk driver, modified to handle BR 1537 and 1711 controllers
+     with T300, T200, T80 and T50 drives.
+hk
+     RK06/07 disk driver.
+ra
+     MSCP disk device driver (rx23, rx33, rx50, rd??, ra??, rz??).
+rk
+     RK disk driver.
+rl
+     RL disk driver.
+rx
+     RX02 disk driver.
+si
+     SI 9500 CDC 9766 disk driver.
+xp
+     SMD disk driver.
+
+vt
+     Virtual Tape drive.
+ht
+     TU16/TE16/TU77 tape driver.
+tm
+     TU10/TE10/TS03 tape driver.
+ts
+     TS11/TU80/TS05/TK25 tape driver.
+
+An Example Disk Image Copy
+
+Here is an example output where the user has booted from the vtserver,
+loaded copy and then copied the image disk.img to their RL02 disk.
+
+  Virtual tape server, $Revision: 1.4 $
+  Running command stty -f /dev/ttyid1 19200 cs8 clocal -crtscts
+
+  Tape records are:
+     0 copy
+     1 disk.img
+
+  Opening port /dev/ttyd1 .... Port open
+
+  Opened copy read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+  Standalone copy program - known devices are
+  ht tm ts ram hk ra rk rl rx si xp br tms vt
+
+  Tape record n from device xx is written as xx(0,0,n)
+  Disk device xx is written as xx(0,0,0)
+
+  Enter name of input record/device: vt(0,0,1)
+
+  Opened disk.img read-write
+   Enter name of output record/device: rl(0,0,0)
+  rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr ... rrrr EOF
+  EOF
+  Copying done. Either reset the system, or hit
+  <return> to exit the standalone program.
+
+At this point, the PDP-11 can be rebooted. If the downloaded disk image is
+bootable, the user should now have a working PDP-11 operating system.
+
+A Warning
+
+Jay Jaeger sends in this timely warning about the size of disk images:
+
+     Something I thought is worth warning folks about. For RL01, RL02,
+     RK06 and RK07 (at least), the last cylinder is RESERVED for bad
+     blocks and the pack serial number.
+
+     Except for maintaining the bad block list, software should not
+     write there, and should at least preserve the serial number (and
+     its mirror copies that are usually present) when doing so.
+
+     The current implementation of VTServer (in particular, the code in
+     the ``hk'' driver in pdpvtstand/) does not appear to take that
+     into account.
+
+     The problem is that if you take a full pack image from a pack and
+     then restore that full pack image to a different pack, you will
+     wipe out the latter's bad block info (and perhaps write in some
+     areas that are known not to be very good).
+
+     Traditionally, Unix variants dealt with this by insisting that you
+     use error free (Suffix -EF in the DEC part number on the pack)
+     disk packs. However, if you are using real hardware you may no
+     longer have those available.
+
+Installing 2.11BSD with Vtserver
+
+To install 2.11BSD via the vtserver, you need to set up a virtual tape with
+records corresponding to the standard 2.11BSD tape. You don't need any
+boostrap records on your virtual tape, and so your .vtrc file should look
+something like this (minus the comment lines):
+
+  stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+  /dev/ttyd1
+  boot.dd
+  disklabel
+  mkfs
+  restor
+  icheck
+  root.dump
+  usr.tar
+  otherusr.tar
+
+Don't use the standalone programs disklabel, mkfs, icheck and restor from
+standard 2.11BSD, as they don't speak the VT protocol. Instead, use the
+VT-enabled programs supplied with the vtserver.
+
+Apart from setting up the serial line, compiling and starting vtserver, and
+entering in the VT boot code, you should be able to follow the standard
+2.11BSD installation instructions. As an example, here is an example output
+where a user made a root filesystem on an RL02, and then restored the
+root.dump to this disk:
+
+  $ vtserver
+  Virtual tape server, $Revision: 1.4 $
+  Running command stty -f /dev/ttyid1 19200 cs8 clocal -crtscts
+
+  Tape records are:
+     0 boot.dd
+     1 disklabel
+     2 mkfs
+     3 restor
+     4 icheck
+     5 root.dump
+
+  Opening port /dev/ttyd1 .... Port open
+
+  Opened boot.dd read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr EOF
+
+  45Boot from vt(0,0,0) at 0177560
+  : vt(0,0,1)
+
+  Opened disklabel read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06401
+                                                               bootcsr=0177560
+  disklabel
+  Disk? rl(0,0,0)
+  'rl(0,0,0)' is unlabeled or the label is corrupt.
+  Proceed? [y/n] y
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? D
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? d
+
+  type: old DEC
+  disk:
+  label: DEFAULT
+  flags:
+  bytes/sector: 512
+  sectors/track: 20
+  tracks/cylinder: 2
+  sectors/cylinder: 40
+  cylinders: 512
+  rpm: 3600
+  drivedata: 0 0 0 0 0
+
+  1 partitions:
+  #        size   offset    fstype   [fsize bsize]
+    a: 20480 0  2.11BSD    1024 1024      # (Cyl. 0 - 511)
+
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? m
+  modify
+  d(isplay) g(eometry) m(isc) p(artitions) q(uit)? p
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? n
+  Number of partitions (8 max) [1]? 2
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? s
+  a b c d e f g h q(uit)? a
+  sizes and offsets may be given as sectors, cylinders
+  or cylinders plus sectors:  6200, 32c, 19c10s respectively
+  modify partition 'a'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? s
+  'a' size [20480]: 20000
+  modify partition 'a'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? q
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? s
+  a b c d e f g h q(uit)? b
+  sizes and offsets may be given as sectors, cylinders
+  or cylinders plus sectors:  6200, 32c, 19c10s respectively
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? o
+  'b' offset [0]: 20000
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? s
+  'b' size [0]: 480
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? t
+  'b' fstype [unused]: swap
+  modify partition 'b'
+  d(isplay) z(ero) t(ype) o(ffset) s(ize) f(rag) F(size) q(uit)? q
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? d
+
+  type: old DEC
+  disk:
+  label: DEFAULT
+  flags:
+  bytes/sector: 512
+  sectors/track: 20
+  tracks/cylinder: 2
+  sectors/cylinder: 40
+  cylinders: 512
+  rpm: 3600
+  drivedata: 0 0 0 0 0
+
+  2 partitions:
+  #        size   offset    fstype   [fsize bsize]
+    a: 20000 0  2.11BSD    1024 1024      # (Cyl. 0 - 499)
+    b: 480 20000  swap                    # (Cyl. 500 - 511)
+
+  modify partitions
+  d(isplay) n(umber) s(elect) q(uit)? q
+  modify
+  d(isplay) g(eometry) m(isc) p(artitions) q(uit)? q
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? w
+  d(isplay) D(efault) m(odify) w(rite) q(uit)? q
+
+  45Boot from vt(0,0,1) at 0177560
+  : vt(0,0,2)
+
+  Opened mkfs read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06402
+                                                       bootcsr=0177560
+  Mkfs
+  file system: rl(0,0,0)
+  file sys size [10000]:
+  bytes per inode [4096]:
+  interleaving factor (m; 2 default):
+  interleaving modulus (n; 20 default):
+  isize = 2496
+  m/n = 2 20
+  Exit called
+
+  45Boot from vt(0,0,2) at 0177560
+  : vt(0,0,4)
+
+  Opened icheck read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06403
+                                                           bootcsr=0177560
+  Icheck
+  File: rl(0,0,0)
+  rl(0,0,0):
+  files 3 (r=1,d=2,b=0,c=0,l=0,s=0)
+  used 2 (i=0,ii=0,iii=0,d=2)
+  free 9840
+  missing 0
+
+  45Boot from vt(0,0,4) at 0177560
+  : vt(0,0,3)
+
+  Opened restor read-write
+   rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrBoot: bootdev=06404
+                                                             bootcsr=0177560
+  Restor
+  Tape? vt(0,0,5)
+
+  Opened root.dump read-write
+   Disk? rl(0,0,0)
+  Last chance before scribbling on disk. rrrrrrrrrrrrr ...
+  rrrrrrrrrEnd of tape
+
+  45Boot from vt(0,0,4) at 0177560
+  : rl(0,0,0)unix
+  Boot: bootdev=03400 bootcsr=0174400
+
+  2.11 BSD UNIX #115: Sat Apr 22 19:07:25 PDT 2000
+      sms1@curly.2bsd.com:/usr/src/sys/GENERIC
+  [etc.]
+
+Other Comments
+
+The vtserver/ directory holds the source code vtserver.c as well as the
+client binaries boot.dd, copy, disklabel, mkfs, icheck and restor.
+
+The pdpvtstand/ directory holds the source code for the PDP-11 side of
+things: vtboot.pdp, boot, copy, disklabel, mkfs, icheck and restor. In fact,
+this is a copy of /sys/pdpstand from 2.11BSD which has been modified to have
+the vt.c client, the source code for copy and vtboot.pdp.
+
+To compile all of this, you'll need a 2.11BSD system. Place this directory
+in /usr/src/sys, change into pdpvtstand/ and run make. See the RCS comments
+for details.
+
+Caveats
+
+The VTserver software should be considered in beta release. Your feedback is
+most definitely requested, to fix any bugs and to improve the software. In
+particular, I haven't tried this software on all PDP-11 platforms: it should
+work on a system without split I&D, but it does require 192 Kbytes of
+memory.
+
+More specifically, I've used the Ersatz-11 2.0 demo simulator with various
+CPU models, and RL02 and RK05 disk images, to test copy. Here are the
+results: copy can read and write disk images for /24, /34A, /40, /44, /45,
+/70 and /94 systems when they have 256Kbytes of memory. It doesn't work for
+the 11/35 as it doesn't have the MUL instruction, which the 2.11BSD C
+compiler generates.
+
+Also, I have never owned or used a real PDP-11. The VTserver software was
+developed using the Ersatz-11 2.0 simulator and Bob Supnik's 2.3 simulator.
+For this reason, there may be hardware-specific bugs in the software which
+were not found using the simulators. As well, the terminology in this manual
+may not be correct PDP-11 speak. Again, please send me your suggestions and
+improvements!
+  ------------------------------------------------------------------------
+Warren Toomey
+2001-04-04

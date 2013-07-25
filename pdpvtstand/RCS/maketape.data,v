@@ -1,0 +1,34 @@
+head	1.1;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.1
+date	2001.03.23.10.34.48;	author wkt;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@mtboot 1
+mtboot 1
+boot 1
+* 1
+disklabel 2
+* 1
+mkfs 2
+* 1
+restor 2
+* 1
+icheck 2
+@

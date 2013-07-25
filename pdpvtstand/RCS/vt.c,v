@@ -1,0 +1,596 @@
+head	1.13;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.13
+date	2001.03.25.00.18.10;	author wkt;	state Exp;
+branches;
+next	1.12;
+
+1.12
+date	2001.03.24.10.23.20;	author wkt;	state Exp;
+branches;
+next	1.11;
+
+1.11
+date	2001.03.22.23.58.33;	author wkt;	state Exp;
+branches;
+next	1.10;
+
+1.10
+date	2001.03.02.04.42.03;	author mhol;	state Exp;
+branches;
+next	1.9;
+
+1.9
+date	2001.01.30.03.22.04;	author mhol;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	2001.01.24.00.59.25;	author mhol;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	2001.01.23.22.53.39;	author mhol;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2001.01.23.05.03.35;	author mhol;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2001.01.22.05.40.44;	author mhol;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2001.01.22.05.02.30;	author mhol;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2001.01.21.07.37.59;	author mhol;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2001.01.21.07.29.53;	author mhol;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2001.01.21.05.51.45;	author mhol;	state Exp;
+branches;
+next	;
+
+
+desc
+@coped from vtserver 1.1 src tree
+@
+
+
+1.13
+log
+@oops, I also forgot this
+@
+text
+@/*
+ * Virtual tape driver - copyright 1998/2000 Warren Toomey wkt@@cs.adfa.edu.au
+ *
+ * $Revision: 1.12 $
+ * $Date: 2001/03/24 10:23:20 $
+ */
+
+#include <sys/param.h>
+#include "saio.h"
+
+/* Command sent to tape server */
+struct vtcmd {
+    char hdr1;			/* Header, 31 followed by 42 (decimal) */
+    char hdr2;
+    char cmd;			/* Command, one of VTC_XXX below */
+				/* Error comes back in top 4 bits */
+    char record;		/* Record we're accessing */
+    char blklo;			/* Block number, in lo/hi format */
+    char blkhi;
+    char sum0;			/* 16-bit checksum */
+    char sum1;
+};
+
+/* Header bytes */
+#define VT_HDR1		31
+#define VT_HDR2		42
+
+/* Client commands available */
+#define VTC_QUICK	0	/* Quick read, no cksum sent */
+#define VTC_OPEN	1
+#define VTC_CLOSE	2
+#define VTC_READ	3
+#define VTC_WRITE	4
+#define VTC_ZEROREAD    6
+
+/* Errors returned */
+#define VTE_NOREC	1	/* No such record available */
+#define VTE_OPEN	2	/* Can't open requested block */
+#define VTE_CLOSE	3	/* Can't close requested block */
+#define VTE_READ	4	/* Can't read requested block */
+#define VTE_WRITE	5	/* Can't write requested block */
+#define VTE_NOCMD       6       /* No such command */
+#define VTE_EOF         7       /* End of file: no blocks left to read */
+
+#define BLKSIZE         512
+
+/* Static things */
+struct vtcmd vtcmd;		/* Command buffer */
+struct vtcmd vtreply;		/* Reply from server */
+char *vtbuf;			/* Pointer to input buffer */
+unsigned int hitim, lotim;	/* Variables for delay loop */
+unsigned int curblk;		/* Current block */
+
+char vtsendcmd();		/* Forward references */
+char vtgetc();
+
+struct  vtdevice  {
+        int     rcsr,rbuf;
+        int     tcsr,tbuf;
+};
+
+#define NVT	2
+struct  vtdevice *VTcsr[NVT + 1] = {
+                (struct vtdevice *)0177560,	/* We use VTcsr[0]: KL unit 0 */
+                (struct vtdevice *)0,
+                (struct vtdevice *)-1
+};
+
+extern int tapemark;    /* flag to indicate tapemark encountered
+                           (see sys.c as to how it's used) */
+
+
+/*** Standalone-dependent section */
+
+/* vtopen() is used to inform the server which record we'll be using */
+int vtopen(io)
+register struct iob *io;
+{
+    register i;
+
+    vtcmd.record= io->i_part; vtcmd.cmd= VTC_OPEN;
+    curblk=0; vtcmd.blklo=0; vtcmd.blkhi=0;
+    io->i_flgs |= F_TAPE;
+
+    vtsendcmd();		/* Send the command to the server */
+}
+
+int vtclose(io)
+struct  iob     *io;
+{
+	return(-1);		/* Same as nullsys */
+}
+
+int vtseek(io, space)
+struct  iob     *io;
+register int    space;
+{
+    curblk+= space+space;	/* Double to convert 1024K blk# to 512 blk# */
+}
+
+
+/* We send a command to the server, get a reply, and return the
+ * amount read (even on EOF, which may be zero) or -1 on error.
+ */
+int vtstrategy(io, func)
+register struct iob *io;
+{
+    register error, i;
+
+    vtbuf= io->i_ma;
+
+    /* Assume record, blklo and blkhi are ok */
+    /* Assume i->i_cc is in multiples of BLKSIZE */
+    for (i=0; i<io->i_cc; i+=BLKSIZE, vtbuf+=BLKSIZE, curblk++) {
+        if (func==WRITE) vtcmd.cmd= VTC_WRITE;
+        else vtcmd.cmd= VTC_ZEROREAD;
+
+        error= vtsendcmd();		/* Send the command to the server */
+
+	/* Some programs rely on the buffer being
+ 	 * cleared to indicate EOF, e.g cat.
+	 */
+	if (error == VTE_EOF) { tapemark=1; vtbuf[0]=0; return(i); }
+
+	if (error != 0) { printf("tape error %d", error); return(-1); }
+    }
+    return(io->i_cc);
+}
+
+/*** Protocol-specific stuff ***/
+
+char vtsendcmd()
+{
+    register i;
+    char error, cmd, sum0, sum1;
+
+			/* Determine block bytes */
+    vtcmd.blklo= curblk & 0377;
+    vtcmd.blkhi= curblk >>8;
+
+			/* Build the checksum */
+    vtcmd.hdr1= VT_HDR1; vtcmd.hdr2= VT_HDR2;
+    vtcmd.sum0= VT_HDR1 ^ vtcmd.cmd    ^ vtcmd.blklo;
+    vtcmd.sum1= VT_HDR2 ^ vtcmd.record ^ vtcmd.blkhi;
+
+    /* Calculate the checksum over the data if a write */
+    if (vtcmd.cmd==VTC_WRITE)
+      for (i=0; i<BLKSIZE; i++) {
+	vtcmd.sum0 ^= vtbuf[i]; i++;
+	vtcmd.sum1 ^= vtbuf[i];
+      }
+
+			/* Send the command to the server */
+  sendcmd:
+    vtputc(vtcmd.hdr1);  vtputc(vtcmd.hdr2);
+    vtputc(vtcmd.cmd);   vtputc(vtcmd.record);
+    vtputc(vtcmd.blklo); vtputc(vtcmd.blkhi);
+    if (vtcmd.cmd==VTC_WRITE) for (i=0; i<BLKSIZE; i++) vtputc(vtbuf[i]);
+    vtputc(vtcmd.sum0);  vtputc(vtcmd.sum1);
+
+  			/* Now get a valid reply from the server */
+  getreply:
+    vtreply.hdr1= vtgetc(); if (hitim==0) goto sendcmd;
+    if (vtreply.hdr1!=VT_HDR1) goto getreply;
+    vtreply.hdr2= vtgetc(); if (hitim==0) goto sendcmd;
+    if (vtreply.hdr2!=VT_HDR2) goto getreply;
+    vtreply.cmd= vtgetc(); if (hitim==0) goto sendcmd;
+    vtreply.record= vtgetc(); if (hitim==0) goto sendcmd;
+    vtreply.blklo= vtgetc(); if (hitim==0) goto sendcmd;
+    vtreply.blkhi= vtgetc(); if (hitim==0) goto sendcmd;
+
+
+			/* Calc. the cksum to date */
+    sum0= VT_HDR1 ^ vtreply.cmd ^ vtreply.blklo;
+    sum1= VT_HDR2 ^ vtreply.record ^ vtreply.blkhi;
+
+			/* Retrieve the block if no errs and a READ reply */
+    if (vtreply.cmd==VTC_READ) {
+      for (i=0; i<BLKSIZE; i++) {
+	vtbuf[i]= vtgetc(); if (hitim==0) goto sendcmd;
+	sum0 ^= vtbuf[i]; i++;
+	vtbuf[i]= vtgetc(); if (hitim==0) goto sendcmd;
+	sum1 ^= vtbuf[i];
+      }
+    }
+			/* Get the checksum */
+    vtreply.sum0= vtgetc(); if (hitim==0) goto sendcmd;
+    vtreply.sum1= vtgetc(); if (hitim==0) goto sendcmd;
+
+			/* Try again on a bad checksum */
+    if ((sum0!=vtreply.sum0) || (sum1!=vtreply.sum1)) {
+	putchar('e'); goto sendcmd;
+    }
+			/* Zero the buffer if a successful zero read */
+    if (vtreply.cmd==VTC_ZEROREAD) for (i=0; i<BLKSIZE; i++) vtbuf[i]=0;
+
+			/* Extract any error */
+    error= vtreply.cmd >> 4; return(error);
+}
+
+/*** Harware-specific stuff ***/
+
+/* vtgetc() and vtputc(): A sort-of repeat of the getchar/putchar
+ * code in prf.c, but without any console stuff
+ */
+
+/* Get a character, or timeout and return with hitim zero */
+char vtgetc()
+{   
+        register c;
+    
+        VTcsr[0]->rcsr = 1; hitim=3; lotim=65535;
+  
+        while ((VTcsr[0]->rcsr&0200)==0) {
+	   lotim--;
+	   if (lotim==0) hitim--;
+	   if (hitim==0) { putchar('t'); return(0); }
+	}
+        c = VTcsr[0]->rbuf; return(c);
+}
+
+vtputc(c)
+register c;
+{
+        register s;
+
+        while((VTcsr[0]->tcsr&0200) == 0) ;
+        s = VTcsr[0]->tcsr;
+        VTcsr[0]->tcsr = 0; VTcsr[0]->tbuf = c; VTcsr[0]->tcsr = s;
+}
+@
+
+
+1.12
+log
+@much better way of tracking the current block
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.11 $
+ * $Date: 2001/03/22 23:58:33 $
+d83 1
+@
+
+
+1.11
+log
+@have to pass 1K blk numbers to vtseek from tinysys
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.10 $
+ * $Date: 2001/03/02 04:42:03 $
+d52 1
+d82 1
+a82 1
+    vtcmd.blklo=0; vtcmd.blkhi=0;
+d97 1
+a97 3
+
+    space *= 2;		/* Double to convert 1024K blk# to 512 blk# */
+    vtcmd.blklo=space; vtcmd.blkhi=0;
+d113 1
+a113 1
+    for (i=0; i<io->i_cc; i+=BLKSIZE, vtbuf+=BLKSIZE) {
+a124 3
+
+ 	/* Increment block number for next time */
+	vtcmd.blklo++; if (vtcmd.blklo==0) vtcmd.blkhi++;
+d136 4
+a219 1
+
+@
+
+
+1.10
+log
+@added write support for the client
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.9 $
+ * $Date: 2001/01/30 03:22:04 $
+d96 2
+@
+
+
+1.9
+log
+@switched to the console KL-11
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.8 $
+ * $Date: 2001/01/24 00:59:25 $
+d28 1
+a28 1
+/* Commands available */
+d32 1
+a32 1
+#define VTC_READ	3	/* This file only uses READ and OPEN */
+a33 1
+#define VTC_ACK         5
+d89 1
+a89 1
+	return(-1);		/* Same a nullsys */
+d100 2
+a101 3
+/* vtstrategy() must be called as a READ. We send a command
+ * to the server, get a reply, and return the amount read
+ * (even on EOF, which may be zero) or -1 on error.
+d113 2
+a114 2
+
+	vtcmd.cmd= VTC_ZEROREAD;
+d118 3
+a120 3
+					/* Some programs rely on */
+					/* the buffer being cleared to */
+					/* indicate EOF, e.g cat */
+d123 4
+a126 7
+	if (error != 0) {
+	  printf("tape error %d", error);
+	  return(-1);
+ 	}
+        			/* Increment block number for next time */
+	vtcmd.blklo++;
+	if (vtcmd.blklo==0) vtcmd.blkhi++;
+d128 1
+a128 1
+	return(io->i_cc);
+d140 1
+a140 1
+    vtcmd.sum0= VT_HDR1 ^ vtcmd.cmd ^ vtcmd.blklo;
+d143 7
+d155 1
+d174 1
+a174 1
+			/* Retrieve the block if no errs and a READ cmd */
+@
+
+
+1.8
+log
+@fixed seeking so that split I/D files load
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.7 $
+ * $Date: 2001/01/23 22:53:39 $
+a52 2
+char modfour=0;			/* Toggle status printing character */
+char *statusstr= "-\\|/";
+d64 1
+a64 1
+                (struct vtdevice *)0176500,	/* We use VTcsr[0]1 unit 1 */
+a189 2
+
+    putchar(010); putchar(statusstr[modfour]); modfour= (++modfour) & 3;
+@
+
+
+1.7
+log
+@ok, now a much smaller vt-only boot program
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.6 $
+ * $Date: 2001/01/23 05:03:35 $
+d99 1
+a99 1
+	printf("vt driver got space %d\n",space);
+@
+
+
+1.6
+log
+@changed visual feedback to be rotating ascii bar
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.5 $
+ * $Date: 2001/01/22 05:40:44 $
+d87 6
+@
+
+
+1.5
+log
+@*** empty log message ***
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.4 $
+ * $Date: 2001/01/22 05:02:30 $
+d53 2
+a54 2
+char oddeven=0;			/* Toggle status printing character */
+char *oddstr= ".*";
+d112 1
+a112 1
+	vtcmd.cmd= VTC_READ;
+d187 1
+a187 1
+    putchar(oddstr[oddeven]); oddeven= 1-oddeven;
+@
+
+
+1.4
+log
+@dumb braino mistake
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.3 $
+ * $Date: 2001/01/21 07:37:59 $
+d87 7
+@
+
+
+1.3
+log
+@*** empty log message ***
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.2 $
+ * $Date: 2001/01/21 07:29:53 $
+d34 2
+a35 1
+#define VTC_ZEROREAD	5
+d83 1
+a83 1
+    vtcmd.record= io->i_boff; vtcmd.cmd= VTC_OPEN;
+d178 1
+a178 1
+    if (vtreply.cmd==VTC_READ) for (i=0; i<BLKSIZE; i++) vtbuf[i]=0;
+@
+
+
+1.2
+log
+@ok, it compiles, I wonder if it works
+@
+text
+@d4 2
+a5 2
+ * $Revision: 1.1 $
+ * $Date: 2001/01/21 05:51:45 $
+d34 1
+d176 2
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 1
+a2 1
+ * Virtual tape driver - copyright 1998 Warren Toomey	wkt@@cs.adfa.oz.au
+d4 2
+a5 2
+ * $Revision: 1.9 $
+ * $Date: 1998/02/01 00:49:15 $
+a8 1
+#include <sys/inode.h>
+d57 15
+d76 1
+a76 1
+vtopen(io)
+d92 1
+a92 1
+vtstrategy(io, func)
+d110 1
+a110 1
+	if (error == VTE_EOF) { vtbuf[0]=0; return(i); }
+a183 7
+struct  device  {
+        int     rcsr,rbuf;
+        int     tcsr,tbuf;
+};
+
+static struct  device *KL1= {0176500};		/* We use KL11 unit 1 */
+
+d193 1
+a193 1
+        KL1->rcsr = 1; hitim=3; lotim=65535;
+d195 1
+a195 1
+        while ((KL1->rcsr&0200)==0) {
+d200 1
+a200 1
+        c = KL1->rbuf; return(c);
+d209 3
+a211 3
+        while((KL1->tcsr&0200) == 0) ;
+        s = KL1->tcsr;
+        KL1->tcsr = 0; KL1->tbuf = c; KL1->tcsr = s;
+@

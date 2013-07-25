@@ -1,0 +1,40 @@
+head	1.1;
+access;
+symbols;
+locks
+	mhol:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	2001.01.30.04.10.21;	author mhol;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@# 	Configuration file for Virtual Tape Server
+#
+# First line is any Unix command needed to set the serial port up
+stty -f /dev/ttyid1 9600 cs8 clocal -crtscts
+#
+# Second line in this file is the serial port device
+/dev/ttyd1
+#
+# After that is the list of files on the virtual tape, e.g
+#   Record 0: the tinyboot program
+#   Record 1: the copy ptogram
+#   Record 2: a disk image for your root disk
+#
+tinyboot
+copy
+root.img
+@

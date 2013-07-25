@@ -1,0 +1,416 @@
+head	1.7;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.7
+date	2001.03.25.03.25.12;	author wkt;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	2001.03.24.09.56.09;	author wkt;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	2001.03.24.09.53.37;	author wkt;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	2001.03.24.09.19.59;	author wkt;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2001.03.24.08.28.45;	author wkt;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2001.03.23.10.40.32;	author wkt;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2001.03.23.10.34.48;	author wkt;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@merged in with original 2.11 makefile
+@
+text
+@#	Makefile	(2.11BSD)	2.3	1997/8/11
+#
+#	The limitations on program size have been removed.  The addition
+#	of disklabel support pushed 'restor' over the limit.  Even with
+#	additional space saving measures it was impossible to fit restor
+#	into 48kb.  'icheck' and 'restor' are now built with split I/D.
+#
+#	This is not as bad as it sounds - the kernel has not been able to
+#	run on a non split machine for many years.  It made little sense 
+#	to restrict the standalone utilities to non-split mode when the
+#	operating system itself required split I/D.
+#
+#	It is still possible to hand craft a version of the utilities by leaving
+#	out all but the necessary drivers. 
+#
+# 1997/8/11  - add -O to maketape and makesimtape compile commands
+# 1997/1/24  - remove 'skel' from lists of directories.
+# 1997/1/18  - add 'makesimtape' target.
+# 1996/10/28 - added usr/sbin, usr/libexec and corresponding src directories.
+# 1995/12/05 - add RX02 driver.
+# 1995/06/05 - add disklabel program to Makefile.
+# 1995/06/01 - use split I/D for icheck and restor.
+# 1995/05/30 - Begin adding disklabel support.
+
+# DISK	which disk to take a root dump of for the distribution tape
+# TAPE	which tape to write the distribution on
+# DUMP	where to store a root system dump if you do a ``make dump''
+#
+DISK=	xp0a
+TAPE=	mt8
+DUMP=	/usr/root.dump
+
+ROOT=	
+SBINSRC=${ROOT}/usr/src/sbin
+MKFS=	${SBINSRC}/mkfs/mkfs.c
+RESTOR=	${SBINSRC}/restor/restor.c
+ICHECK=	${SBINSRC}/icheck/icheck.c
+
+DEFS=	-DSTANDALONE -I${ROOT}/usr/include -I${ROOT}.
+CFLAGS=	-O ${DEFS}
+
+BOOT=	M.o boot.o ubmapset.o
+DRIVERS=prf.o sys.o label.o \
+	ht.o tm.o ts.o tmscp.o vt.o \
+	xp.o rk.o rl.o rx.o br.o hk.o si.o ra.o
+
+ALL=	mtboot vtboot boot disklabel mkfs restor icheck copy \
+					maketape makesimtape toyset
+
+all: ${ALL}
+
+.c.o:
+	cc ${CFLAGS} -c $*.c
+
+.s.o:
+	/lib/cpp -P ${DEFS} $< | as -u -V -o $@@
+
+srt0-i.o: srt0.s
+	/lib/cpp -P -DSPLIT_ID ${DEFS} srt0.s | as -u -V -o $@@
+
+distribution: tape1 switch_tapes tape2
+
+tmscptape: ${ALL} ${DUMP}
+	./maketape /dev/nr${TAPE} maketape.data
+	dd if=${DUMP} of=/dev/nr${TAPE} bs=20b
+	cd ${ROOT}/usr; tar cfb /dev/nr${TAPE} 20 \
+		adm bin crash dict doc games guest hosts include ingres \
+		lib libdata libexec local man msgs new old preserve pub \
+		sbin share spool tmp ucb
+	cd ${ROOT}/usr/src; tar cfb /dev/nr${TAPE} 20 \
+		sys include
+	cd ${ROOT}/usr/src; tar cfb /dev/r${TAPE} 20 \
+		Makefile asm.sed asm.sed.pdp asm.sed.vax bin etc games \
+		lib libexec local man new old sbin share ucb usr.bin \
+		usr.lib usr.sbin
+
+tape1: ${ALL} ${DUMP}
+	./maketape /dev/nr${TAPE} maketape.data
+	dd if=${DUMP} of=/dev/nr${TAPE} bs=20b
+	cd ${ROOT}/usr; tar cfb /dev/nr${TAPE} 20 \
+		adm bin crash dict doc games guest hosts include ingres \
+		lib libdata libexec local man msgs new old preserve pub \
+		sbin share spool tmp ucb
+	cd ${ROOT}/usr/src; tar cfb /dev/nr${TAPE} 20 \
+		sys include
+
+switch_tapes: FRC
+	@@echo "Switch tapes.  Hit CR when second tape is mounted."
+	@@head -1
+
+FRC:
+
+tape2:
+	cd ${ROOT}/usr/src; tar cfb /dev/r${TAPE} 20 \
+		Makefile asm.sed asm.sed.pdp asm.sed.vax bin etc games \
+		lib libexec local man new old sbin share ucb usr.bin \
+		usr.lib usr.sbin
+
+${DUMP}:
+	@@echo "You must make a dump of the root file system first."
+	exit 1
+
+dump:
+	dump 0f ${DUMP} /dev/r${DISK}
+
+install: boot
+	install -s boot ${ROOT}/
+
+
+libsa.a: ${DRIVERS}
+	ar rv $@@ $?
+	ranlib $@@
+
+mkfs.o: ${MKFS}
+	cc ${CFLAGS} -c ${MKFS}
+
+restor.o: ${RESTOR}
+	cc ${CFLAGS} -c ${RESTOR}
+
+icheck.o: ${ICHECK}
+	cc ${CFLAGS} -c ${ICHECK}
+
+mtboot: mtboot.o
+	strip $@@.o
+	dd if=$@@.o of=mtboot bs=16 skip=1
+	rm -f $@@.o
+
+vtboot: vtboot.o
+	strip $@@.o
+	dd if=$@@.o of=vtboot bs=16 skip=1
+	rm -f $@@.o
+
+boot: M.o conf.o boot.o ubmapset.o libsa.a
+	ld -X -o $@@ M.o conf.o boot.o ubmapset.o libsa.a -lc
+	strip boot
+	dd if=boot of=boot.dd bs=16 skip=1
+
+copy: M.o conf.o copy.o ubmapset.o libsa.a
+	ld -X  M.o conf.o copy.o ubmapset.o libsa.a -lkern -lc
+	strip a.out
+	dd if=a.out of=copy bs=16 skip=1
+	rm -f a.out
+
+mkfs: srt0.o conf.o libsa.a mkfs.o
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a -lc
+
+restor: srt0-i.o conf.o libsa.a restor.o
+	ld -X -i -o $@@ srt0-i.o conf.o $@@.o libsa.a -lc
+
+icheck: srt0-i.o conf.o libsa.a icheck.o
+	ld -X -i -o $@@ srt0-i.o conf.o $@@.o libsa.a -lc
+
+disklabel: srt0.o conf.o libsa.a disklabel.o displaylab.o
+	ld -X -o $@@ srt0.o conf.o $@@.o displaylab.o libsa.a -lc
+
+maketape: maketape.c
+	cc -O -o $@@ maketape.c
+
+makesimtape: makesimtape.c
+	cc -O -o $@@ makesimtape.c
+
+toyset: toyset.o srt0.o conf.o libsa.a
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a -lc
+
+tags: FRC
+	rm -f tags
+	ctags *.[ch]
+	for i in M.s; do \
+		${EGREP} '^[_a-zA-Z][_a-zA-Z0-9]*:' $$i \
+		| ${SED} "s;\([^:]*\):\(.*\)$$;\1	$$i	/^\1:\2$$/;" \
+		>> tags; \
+	done
+	sort -o tags tags
+
+FRC:
+
+clean:
+	rm -f ${ALL} ${AUX} libsa.a *.o tags boot.dd
+
+boot.o:		boot.c
+conf.o:		conf.c
+cat.o:		cat.c
+displaylab.o:	displaylab.c
+disklabel.o:	disklabel.c
+hk.o:		hk.c
+ht.o:		ht.c
+label.o:	label.c
+mtboot.o:	mtboot.s
+prf.o:		prf.c
+rk.o:		rk.c
+rl.o:		rl.c
+rx.c:		rx.c
+br.o:		br.c
+srt0.o:		srt0.s
+srt0-i.o:	srt0.s
+sys.o:		sys.c
+tm.o:		tm.c
+tmscp.o:	tmscp.c
+ts.o:		ts.c
+ubmapset.o:	ubmapset.c
+xp.o:		xp.c
+vt.o:		vt.c
+@
+
+
+1.6
+log
+@ok, the savings with tinysys.c are not su great
+@
+text
+@a40 2
+LDFLAGS= -lc
+TINYLDFLAGS= -lkern -lc
+d44 1
+a44 1
+	ht.o tm.o vt.o ts.o tmscp.o \
+d47 2
+a48 2
+ALL=	mtboot vtboot boot disklabel mkfs restor icheck \
+	maketape makesimtape toyset copy
+d128 5
+d134 3
+a136 3
+	ld -X -o a.out M.o conf.o boot.o ubmapset.o libsa.a ${LDFLAGS}
+	strip a.out
+	dd if=a.out of=boot bs=16 skip=1
+d138 2
+a139 2
+copy: tinyM.o copy.o tinyconf.o ubmapset.o libsa.a
+	ld -X -o a.out tinyM.o copy.o tinyconf.o ubmapset.o libsa.a ${LDFLAGS}
+d142 1
+a142 7
+
+tinyconf.o: conf.c
+	cc ${CFLAGS} -DCOPY -c conf.c
+	mv conf.o tinyconf.o
+
+tinyM.o: M.s
+	/lib/cpp -P ${DEFS} -DCOPY M.s | as -u -V -o tinyM.o
+d145 1
+a145 1
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a ${LDFLAGS}
+d148 1
+a148 1
+	ld -X -i -o $@@ srt0-i.o conf.o $@@.o libsa.a ${LDFLAGS}
+d151 1
+a151 1
+	ld -X -i -o $@@ srt0-i.o conf.o $@@.o libsa.a ${LDFLAGS}
+d154 1
+a154 1
+	ld -X -o $@@ srt0.o conf.o $@@.o displaylab.o libsa.a ${LDFLAGS}
+d163 1
+a163 6
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a ${LDFLAGS}
+
+vtboot: vtboot.o
+	strip $@@.o
+	dd if=$@@.o of=vtboot bs=16 skip=1
+	rm -f $@@.o
+d178 1
+a178 1
+	rm -f ${ALL} ${AUX} libsa.a *.o tags
+@
+
+
+1.5
+log
+@ok, no longer relocating copy, and using a smaller sys.c
+@
+text
+@d135 2
+a136 3
+copy: tinyM.o copy.o tinyconf.o tinysys.o ubmapset.o libsa.a
+	ld -X -o a.out tinyM.o copy.o tinyconf.o tinysys.o \
+					ubmapset.o libsa.a ${LDFLAGS}
+@
+
+
+1.4
+log
+@ok, got rid of annoying label messages
+@
+text
+@d135 2
+a136 2
+copy: M.o copy.o tinyconf.o tinysys.o ubmapset.o libsa.a
+	ld -X -o a.out M.o copy.o tinyconf.o tinysys.o \
+d144 3
+@
+
+
+1.3
+log
+@*** empty log message ***
+@
+text
+@a62 3
+tinysrt0.o: srt0.s
+	/lib/cpp -P -DTINY ${DEFS} srt0.s | as -u -V -o $@@
+
+d135 3
+a137 3
+tinyboot: M.o conf.o boot.o ubmapset.o libsa.a
+	ld -X -o a.out M.o conf.o boot.o ubmapset.o \
+							libsa.a ${TINYLDFLAGS}
+d139 1
+a139 1
+	dd if=a.out of=tinyboot bs=16 skip=1
+d141 3
+a143 2
+copy: copy.o tinysrt0.o conf.o libsa.a
+	ld -X -o $@@ tinysrt0.o conf.o $@@.o libsa.a -lkern ${TINYLDFLAGS}
+@
+
+
+1.2
+log
+@strip boot and remove first 16 bytes, use -lkern to be more CPU supporting,
+assemble vtboot
+@
+text
+@d41 2
+a42 1
+LDFLAGS= -lkern -lc
+d63 3
+d138 8
+a145 2
+copy: copy.o srt0.o conf.o libsa.a
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a -lkern ${LDFLAGS}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d41 1
+d45 1
+a45 1
+	ht.o tm.o ts.o tmscp.o \
+d48 2
+a49 1
+ALL=	mtboot boot disklabel mkfs restor icheck maketape makesimtape toyset
+d130 6
+a135 1
+	ld -X -o $@@ M.o conf.o boot.o ubmapset.o libsa.a -lc
+d138 1
+a138 1
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a -lc
+d141 1
+a141 1
+	ld -X -i -o $@@ srt0-i.o conf.o $@@.o libsa.a -lc
+d144 1
+a144 1
+	ld -X -i -o $@@ srt0-i.o conf.o $@@.o libsa.a -lc
+d147 1
+a147 1
+	ld -X -o $@@ srt0.o conf.o $@@.o displaylab.o libsa.a -lc
+d156 6
+a161 1
+	ld -X -o $@@ srt0.o conf.o $@@.o libsa.a -lc
+d200 1
+@
