@@ -1,6 +1,7 @@
-# 	Configuration file for Virtual Tape Server
-
-
+#	Configuration file for Virtual Tape Server
+# 
+# *** CAUTION: all lines must be comments or data, NO EMPTY LINES ***
+#
 # First line is any Unix command needed to set the serial port up
 #
 # Use this one with BSD stty (FreeBSD, OpenBSD, Mac OS X, et c.)
@@ -11,21 +12,19 @@
 #
 # Using echo allows for testing that your executable runs!
 echo
-
-
+#
 # Second line in this file is the serial port device
 # /dev/ttyd1 from above should match this
 /dev/ttyp9
-
-
+#
 # After that is the list of files on the virtual tape, e.g
 #   Record 0: the copy ptogram
 #   Record 1: a disk image for your root disk
 #
 copy
 disk.img
-
-
+#
+#
 # Alternatively, if you want to install 2.11BSD using the standard
 # tape install, comment the above 2 lines out and uncomment the
 # following lines
